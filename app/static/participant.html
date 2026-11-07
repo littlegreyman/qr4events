@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="theme-color" content="#2f5597">
+  <title>活动报名与签到</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand-mark">签</div>
+      <div>
+        <div class="brand-text">活动报名与签到</div>
+        <div class="brand-sub">一个二维码，报名与报到都可以</div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <div id="loading" class="card">
+      <div class="skeleton sk-line title"></div>
+      <div class="skeleton sk-line"></div>
+      <div class="skeleton sk-line short"></div>
+      <div class="divider"></div>
+      <div class="skeleton sk-line"></div>
+      <div class="skeleton sk-line short"></div>
+      <p class="tiny" style="margin-top:16px">正在加载活动信息…</p>
+    </div>
+
+    <div id="app" class="hidden">
+      <div class="card" id="activity-card"></div>
+
+      <div class="card tight" id="identity-card">
+        <h2 style="font-size:15px;margin-bottom:8px">查询我的状态</h2>
+        <p class="tiny" style="margin-bottom:10px">输入报名时填写的手机号，查看是否已报名或可报到。之前在本机填过会自动带出。</p>
+        <div class="lookup">
+          <input type="tel" id="phone-lookup" inputmode="numeric" autocomplete="tel"
+                 maxlength="20" placeholder="请输入手机号" aria-label="手机号">
+          <button class="btn" id="lookup-btn" type="button">查询</button>
+        </div>
+        <div class="field-error" id="lookup-error"></div>
+      </div>
+
+      <div id="main"></div>
+    </div>
+
+    <div class="footer">
+      <a href="/privacy">隐私政策</a><br>
+      本页面为免费活动登记工具，仅收集活动所需信息；如遇「继续访问」提示，点击即可，或用浏览器扫码。<br>
+      <span id="filing-line"></span>
+    </div>
+  </div>
+  <script src="/static/p.js"></script>
+  <script src="/static/filing.js"></script>
+</body>
+</html>

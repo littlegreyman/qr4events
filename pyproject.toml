@@ -1,0 +1,21 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "PIE", "RUF", "TRY", "C4", "FURB"]
+# B008: FastAPI 官方惯用写法就是 Depends(...) 放在参数默认值
+# RUF001/2/3: 中文项目全角标点被判为「歧义字符」，属规则误报
+# TRY004: 统一用 ValueError 表达输入非法，便于 API 层统一转 400
+# E501: 中文注释/长断言按 100 列换行反而降低可读性
+ignore = ["B008", "TRY003", "TRY004", "TRY400", "RUF001", "RUF002", "RUF003", "E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["TRY004"]

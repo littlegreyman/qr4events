@@ -1,0 +1,25 @@
+#!/bin/bash
+# CloudBase HTTP 云函数启动脚本（C1）
+# 平台把 HTTP 请求转发到容器 9000 端口；Python 依赖打包在 third_party/。
+# 依赖打包命令（本地/CI 执行）：
+#   pip install -r requirements.txt -t third_party
+# 注意：必须 chmod +x scf_bootstrap，且监听 0.0.0.0:9000。
+set -euo pipefail
+
+# 用脚本自身所在目录定位代码与依赖，避免硬编码平台解压路径（/app、/var/user 等）。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+export TZ=Asia/Shanghai
+export APP_TZ=Asia/Shanghai
+export PYTHONUNBUFFERED=1
+export PYTHONPATH="$SCRIPT_DIR/third_party:${PYTHONPATH:-}"
+
+# 平台镜像里 python3 / python 命名不一，优先 python3 并兜底。
+if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN=python3
+else
+    PYTHON_BIN=python
+fi
+
+exec "$PYTHON_BIN" -m uvicorn app.main:app --host 0.0.0.0 --port 9000 --no-access-log

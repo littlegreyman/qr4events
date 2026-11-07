@@ -1,0 +1,29 @@
+# 密钥与运行时数据 —— 绝不入库
+.env
+*.key
+*.pem
+data/
+*.db
+*.db-wal
+*.db-shm
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.venv/
+venv/
+
+# 依赖锁定（保留 requirements.txt，不提交 lock）
+*.log
+.DS_Store
+
+# CloudBase HTTP 云函数依赖打包目录（体积大，由 CI 生成，不入库）
+third_party/
+
+# WorkBuddy 项目数据（memory/会话记录等；保留在磁盘，但不进代码仓库）
+.workbuddy/

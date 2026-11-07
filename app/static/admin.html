@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2f5597">
+  <title>组织者后台 · 活动登记助手</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <!-- 登录视图 -->
+  <div id="login-view" class="wrap">
+    <div class="topbar">
+      <div class="brand-mark">签</div>
+      <div>
+        <div class="brand-text">活动报名与签到</div>
+        <div class="brand-sub">组织者后台</div>
+      </div>
+    </div>
+
+    <div class="card login-card">
+      <h1>组织者登录</h1>
+      <p class="muted">使用管理员账号登录，创建活动、下载二维码并查看报名与报到明细。</p>
+      <form id="login-form" novalidate>
+        <div class="field">
+          <label for="login-user">账号</label>
+          <input type="text" id="login-user" autocomplete="username" maxlength="64"
+                 placeholder="请输入管理员账号">
+        </div>
+        <div class="field">
+          <label for="login-pass">密码</label>
+          <input type="password" id="login-pass" autocomplete="current-password"
+                 maxlength="128" placeholder="请输入管理员密码">
+        </div>
+        <div class="field-error" id="login-error"></div>
+        <button class="btn" id="login-btn" type="submit">登录</button>
+      </form>
+      <div class="divider"></div>
+      <p class="tiny">首次部署若未设置 ADMIN_PASS，随机初始口令见 data/initial_admin_password.txt。</p>
+    </div>
+  </div>
+
+  <!-- 主视图 -->
+  <div id="app-view" class="wrap admin-wrap hidden">
+    <div class="topbar">
+      <div class="brand-mark">签</div>
+      <div style="flex:1">
+        <div class="brand-text">组织者后台</div>
+        <div class="brand-sub" id="whoami"></div>
+      </div>
+      <button class="btn ghost small" id="logout-btn" type="button">退出登录</button>
+    </div>
+
+    <div class="card tight" id="activity-bar">
+      <div class="toolbar">
+        <select id="activity-select" aria-label="选择活动"></select>
+        <button class="btn small" id="new-btn" type="button">+ 新建活动</button>
+        <button class="btn secondary small" id="refresh-btn" type="button">刷新</button>
+      </div>
+    </div>
+
+    <div class="tabs" id="tabs"></div>
+    <div id="tab-content"></div>
+  </div>
+
+  <div class="footer">
+    <a href="/">返回首页</a> · <a href="/privacy">隐私政策</a><br>
+    <span id="filing-line"></span>
+  </div>
+
+  <script src="/static/filing.js"></script>
+  <script src="/static/admin.js"></script>
+</body>
+</html>
