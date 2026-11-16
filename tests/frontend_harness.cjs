@@ -138,9 +138,16 @@ async function run(statusOver, opts) {
     setTimeout() { return 0; },
     clearTimeout() {}
   };
+  const legacyStore = {};
   const localStorage = {
+    getItem(k) { return Object.prototype.hasOwnProperty.call(legacyStore, k) ? legacyStore[k] : null; },
+    setItem(k, v) { legacyStore[k] = String(v); },
+    removeItem(k) { delete legacyStore[k]; }
+  };
+  const sessionStorage = {
     getItem(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
-    setItem(k, v) { store[k] = String(v); }
+    setItem(k, v) { store[k] = String(v); },
+    removeItem(k) { delete store[k]; }
   };
   async function fetch(url, reqOpts) {
     calls.push({ url: url, body: JSON.parse((reqOpts && reqOpts.body) || '{}') });
@@ -158,7 +165,7 @@ async function run(statusOver, opts) {
     };
   }
   const ctx = vm.createContext({
-    document, window, location: { pathname: '/p/' + AID }, localStorage, fetch,
+    document, window, location: { pathname: '/p/' + AID }, localStorage, sessionStorage, fetch,
     console, encodeURIComponent, Date, JSON, Error, RegExp, Promise, Math
   });
   vm.runInContext(P_SRC, ctx, { filename: 'p.js' });
@@ -287,7 +294,8 @@ async function main() {
     seedStore: {
       ['qr4events.queue.' + AID]: JSON.stringify([{
         url: BASE + 'register',
-        payload: { phone: '13800138000', name: '张三', category: '普通', source: 'qr' }
+        payload: { phone: '13800138000', name: '张三', category: '普通', source: 'qr' },
+        savedAt: Date.now()
       }])
     }
   });

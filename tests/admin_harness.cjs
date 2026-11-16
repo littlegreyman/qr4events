@@ -203,7 +203,13 @@ async function fetch(url, opts) {
 }
 
 const store = {};
+const persistentStore = {};
 const localStorage = {
+  getItem(k) { return Object.prototype.hasOwnProperty.call(persistentStore, k) ? persistentStore[k] : null; },
+  setItem(k, v) { persistentStore[k] = String(v); },
+  removeItem(k) { delete persistentStore[k]; }
+};
+const sessionStorage = {
   getItem(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
   setItem(k, v) { store[k] = String(v); },
   removeItem(k) { delete store[k]; }
@@ -230,7 +236,7 @@ class AbortController {
 }
 
 const ctx = vm.createContext({
-  document, window, localStorage, fetch, URL, AbortController, console
+  document, window, localStorage, sessionStorage, fetch, URL, AbortController, console
 });
 
 async function tick(n) {

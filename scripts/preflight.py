@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import sys
@@ -120,8 +121,24 @@ def run_checks(env: dict[str, str], root: Path = ROOT) -> list[Issue]:
     proxy = env.get("TRUST_PROXY", "0").strip()
     if proxy.lower() not in {"", "0", "1", "true", "false", "yes", "no", "on", "off"}:
         issues.append(Issue("WARN", "TRUST_PROXY", f"取值 {proxy!r} 非法，_bool() 会按 false 处理"))
+    elif proxy.lower() in {"1", "true", "yes", "on"} and not env.get("TRUSTED_PROXY_IPS", "").strip():
+        issues.append(Issue("FAIL", "TRUSTED_PROXY_IPS", "TRUST_PROXY=1 时必须配置可信代理 IP/CIDR"))
     else:
-        issues.append(Issue("PASS", "TRUST_PROXY", f"={proxy}（0=不信任 X-Forwarded-For，防限流绕过）"))
+        issues.append(Issue("PASS", "TRUST_PROXY", f"={proxy}（代理信任由 TRUSTED_PROXY_IPS 限定）"))
+    proxy_ips = env.get("TRUSTED_PROXY_IPS", "").strip()
+    if proxy_ips:
+        try:
+            for item in proxy_ips.split(","):
+                ipaddress.ip_network(item.strip(), strict=False)
+        except ValueError:
+            issues.append(Issue("FAIL", "TRUSTED_PROXY_IPS", "必须是逗号分隔的 IP 地址或 CIDR"))
+
+    try:
+        max_request_bytes = int(env.get("MAX_REQUEST_BYTES", str(2 * 1024 * 1024)))
+        if not 1024 <= max_request_bytes <= 16 * 1024 * 1024:
+            raise ValueError
+    except ValueError:
+        issues.append(Issue("FAIL", "MAX_REQUEST_BYTES", "必须是 1 KiB 到 16 MiB 之间的整数"))
 
     static_dir = root / "app" / "static"
     missing = [name for name in STATIC_REQUIRED if not (static_dir / name).is_file()]

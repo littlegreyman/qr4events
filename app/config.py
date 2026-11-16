@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import os
 import secrets
 from dataclasses import dataclass, field
@@ -90,6 +91,18 @@ def _int(key: str, default: int) -> int:
         return default
 
 
+def _networks(key: str) -> tuple:
+    value = os.environ.get(key, "")
+    try:
+        return tuple(
+            ipaddress.ip_network(item.strip(), strict=False)
+            for item in value.split(",")
+            if item.strip()
+        )
+    except ValueError as exc:
+        raise ValueError(f"{key} must contain comma-separated IP addresses or CIDRs") from exc
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str = os.environ.get(
@@ -100,18 +113,28 @@ class Settings:
     admin_user: str = os.environ.get("ADMIN_USER", "admin")
     admin_pass: str = _ADMIN_CREDENTIAL[0]
     admin_pass_generated: bool = _ADMIN_CREDENTIAL[1]
-    token_ttl: int = _int("TOKEN_TTL", 8 * 3600)
+    token_ttl: int = _int("TOKEN_TTL", 3600)
     serve_static: bool = _bool("SERVE_STATIC", True)
     trust_proxy: bool = _bool("TRUST_PROXY", False)
+    trusted_proxy_ips: tuple = _networks("TRUSTED_PROXY_IPS")
     rate_limit_general: int = _int("RATE_LIMIT_GENERAL", 180)
     rate_limit_submit: int = _int("RATE_LIMIT_SUBMIT", 30)
     rate_limit_login: int = _int("RATE_LIMIT_LOGIN", 10)
     rate_window: int = _int("RATE_WINDOW", 60)
+    max_request_bytes: int = _int("MAX_REQUEST_BYTES", 2 * 1024 * 1024)
     short_id_len: int = _int("SHORT_ID_LEN", 6)
     qr_box_size_default: int = 10
     combo_default: bool = True
     default_fields: dict = field(default_factory=lambda: dict(DEFAULT_FIELDS))
     cors_origins: str = os.environ.get("CORS_ORIGINS", "")
+
+    def __post_init__(self) -> None:
+        if not 1024 <= self.max_request_bytes <= 16 * 1024 * 1024:
+            raise ValueError("MAX_REQUEST_BYTES must be between 1024 and 16777216")
+        if self.token_ttl <= 0 or self.rate_window <= 0:
+            raise ValueError("TOKEN_TTL and RATE_WINDOW must be positive")
+        if min(self.rate_limit_general, self.rate_limit_submit, self.rate_limit_login) <= 0:
+            raise ValueError("RATE_LIMIT_* values must be positive")
 
 
 settings = Settings()

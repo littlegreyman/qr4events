@@ -13,12 +13,15 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-RUN mkdir -p /app/data
+RUN addgroup --system app && adduser --system --ingroup app app \
+    && mkdir -p /app/data \
+    && chown -R app:app /app
+
+USER app
 
 EXPOSE 8000
 
-# 注意：不要加 --proxy-headers。uvicorn 开启后会用客户端可伪造的
-# X-Forwarded-For 覆盖 request.client.host，绕过 app/security.py 的
-# TRUST_PROXY 保护，使接口限流形同虚设。若确实部署在可信反向代理之后，
-# 请显式配置 --forwarded-allow-ips <反代IP> 并设置 TRUST_PROXY=1。
+# 不要开启 uvicorn --proxy-headers；应用按 TRUSTED_PROXY_IPS 校验直连代理，
+# 仅对可信代理送来的 X-Forwarded-For 取值。边缘代理应覆盖/安全追加该头，
+# 并通过网络策略禁止客户端绕过代理直连应用。
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

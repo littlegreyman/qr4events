@@ -576,40 +576,66 @@ def details(
     status: str = "all",
     category: str = "",
     order: str = "desc",
-) -> list[dict[str, Any]]:
-    regs = db.scalars(
-        select(Registration).where(Registration.activity_id == a.id)
-    ).all()
-    ci_ids = {
-        r.registration_id
-        for r in db.scalars(select(CheckIn).where(CheckIn.activity_id == a.id)).all()
-    }
-    out: list[dict[str, Any]] = []
+    limit: int | None = None,
+    offset: int = 0,
+    with_total: bool = False,
+) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], int]:
+    query = select(Registration, CheckIn.id).outerjoin(
+        CheckIn, CheckIn.registration_id == Registration.id
+    ).where(Registration.activity_id == a.id)
+    count_query = select(func.count()).select_from(Registration).outerjoin(
+        CheckIn, CheckIn.registration_id == Registration.id
+    ).where(Registration.activity_id == a.id)
     keyword = (search or "").strip()
-    for r in regs:
-        item = _registration_dict(r, a, include_full=True)
-        item["checkedIn"] = r.id in ci_ids
-        if keyword:
-            try:
-                kw_hash = cipher.digest(normalize_phone(keyword))
-            except ValueError:
-                kw_hash = None
-            hit = keyword in r.name or (kw_hash is not None and kw_hash == r.phone_hash)
-            if not hit:
-                continue
-        if status == "checked_in" and not item["checkedIn"]:
-            continue
-        if status == "pending" and item["checkedIn"]:
-            continue
-        if category and item["category"] != category:
-            continue
+    if keyword:
+        try:
+            kw_hash = cipher.digest(normalize_phone(keyword))
+        except ValueError:
+            kw_hash = None
+        predicate = Registration.name.contains(keyword, autoescape=True)
+        if kw_hash:
+            predicate = predicate | (Registration.phone_hash == kw_hash)
+        query = query.where(predicate)
+        count_query = count_query.where(predicate)
+    if status == "checked_in":
+        query = query.where(CheckIn.id.is_not(None))
+        count_query = count_query.where(CheckIn.id.is_not(None))
+    elif status == "pending":
+        query = query.where(CheckIn.id.is_(None))
+        count_query = count_query.where(CheckIn.id.is_(None))
+    if category:
+        query = query.where(Registration.category == category)
+        count_query = count_query.where(Registration.category == category)
+    total = int(db.scalar(count_query) or 0)
+    direction = Registration.created_at.asc() if order == "asc" else Registration.created_at.desc()
+    query = query.order_by(direction, Registration.id.asc() if order == "asc" else Registration.id.desc())
+    if limit is not None:
+        query = query.limit(limit)
+    if offset:
+        query = query.offset(offset)
+    out = []
+    for reg, checked_id in db.execute(query):
+        item = _registration_dict(reg, a, include_full=True)
+        item["checkedIn"] = checked_id is not None
         out.append(item)
-    out.sort(key=lambda x: (x["createdAt"], x["id"]), reverse=order != "asc")
-    return out
+    return (out, total) if with_total else out
 
 
 def export_bytes(db: Session, a: Activity, fmt: str = "xlsx") -> tuple[bytes, str, str]:
-    rows = details(db, a, order="asc")
+    def safe_spreadsheet_value(value: Any) -> Any:
+        """Keep user-provided text from being evaluated as a spreadsheet formula."""
+        if not isinstance(value, str):
+            return value
+        # Spreadsheet applications may ignore leading whitespace/control chars
+        # before recognizing a formula. Prefix an apostrophe for all such cells.
+        probe = value.lstrip("\ufeff\u0000").lstrip()
+        if probe.startswith(("=", "+", "-", "@")):
+            return "'" + value
+        return value
+
+    rows = details(db, a, order="asc", limit=10_001)
+    if len(rows) > 10_000:
+        raise ServiceError("导出最多支持 10,000 条记录，请先筛选或分批归档", 413)
     headers = ["序号", "姓名", "手机号", "类型", "所属部门", "单位", "备注", "报名时间", "报到状态", "报名来源"]
     body: list[list[Any]] = []
     for i, r in enumerate(rows, 1):
@@ -617,6 +643,7 @@ def export_bytes(db: Session, a: Activity, fmt: str = "xlsx") -> tuple[bytes, st
             i, r["name"], r["phoneFull"], r["category"], r["department"], r["unit"],
             r["remark"], r["createdAt"], "已报到" if r["checkedIn"] else "未报到", r["source"],
         ])
+        body[-1] = [safe_spreadsheet_value(value) for value in body[-1]]
     filename = f"activity_{a.id}_{now_shanghai().strftime('%Y%m%d_%H%M%S')}"
     if fmt == "csv":
         buf = io.StringIO()

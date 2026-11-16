@@ -82,8 +82,8 @@ class ActivityWrite(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(max_length=80)
+    password: str = Field(min_length=1, max_length=1024)
 
 
 class WhitelistItem(BaseModel):
@@ -92,7 +92,7 @@ class WhitelistItem(BaseModel):
 
 
 class WhitelistWrite(BaseModel):
-    items: list[WhitelistItem] = Field(default_factory=list)
+    items: list[WhitelistItem] = Field(default_factory=list, max_length=10_000)
 
 
 class QrcodeQuery(BaseModel):

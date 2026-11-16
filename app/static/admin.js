@@ -70,13 +70,13 @@
   }
 
   function readStore(key, fallback) {
-    try { return localStorage.getItem(key) || fallback; } catch (e) { return fallback; }
+    try { return sessionStorage.getItem(key) || fallback; } catch (e) { return fallback; }
   }
   function writeStore(key, value) {
-    try { localStorage.setItem(key, value); } catch (e) { /* 隐私模式忽略 */ }
+    try { sessionStorage.setItem(key, value); } catch (e) { /* 隐私模式忽略 */ }
   }
   function dropStore(key) {
-    try { localStorage.removeItem(key); } catch (e) { /* 忽略 */ }
+    try { sessionStorage.removeItem(key); } catch (e) { /* 忽略 */ }
   }
 
   function fmt(iso) {
@@ -719,9 +719,15 @@
     card.appendChild(table);
     var count = h('p', { class: 'tiny', text: '' });
     card.appendChild(count);
+    var offset = 0;
+    var pageSize = 100;
+    var prevPage = h('button', { class: 'btn secondary small', type: 'button', text: '上一页', disabled: true });
+    var nextPage = h('button', { class: 'btn secondary small', type: 'button', text: '下一页', disabled: true });
+    card.appendChild(h('div', { class: 'btn-row' }, [prevPage, nextPage]));
     parent.appendChild(card);
 
-    async function reload() {
+    async function reload(resetPage) {
+      if (resetPage) offset = 0;
       f.search = String(searchEl.value || '').trim();
       f.status = statusEl.value;
       f.category = catEl.value;
@@ -729,7 +735,8 @@
       var q = '?search=' + encodeURIComponent(f.search) +
         '&status=' + encodeURIComponent(f.status) +
         '&category=' + encodeURIComponent(f.category) +
-        '&order=' + encodeURIComponent(f.order);
+        '&order=' + encodeURIComponent(f.order) +
+        '&limit=' + pageSize + '&offset=' + offset;
       var data = await api('GET', basePath() + '/details' + q);
       var items = data.items || [];
       clear(tbody);
@@ -752,20 +759,33 @@
           ]));
         });
       }
-      count.textContent = '共 ' + items.length + ' 条记录';
+      var total = Number(data.total || 0);
+      count.textContent = '显示 ' + (total ? (offset + 1) : 0) + '–' +
+        Math.min(offset + items.length, total) + ' 条，共 ' + total + ' 条记录';
+      prevPage.disabled = offset <= 0;
+      nextPage.disabled = offset + items.length >= total;
     }
+
+    prevPage.addEventListener('click', function () {
+      offset = Math.max(0, offset - pageSize);
+      reload(false).catch(function (e) { toast(e.message, 'error'); });
+    });
+    nextPage.addEventListener('click', function () {
+      offset += pageSize;
+      reload(false).catch(function (e) { toast(e.message, 'error'); });
+    });
 
     var searchTimer = 0;
     searchEl.addEventListener('input', function () {
       window.clearTimeout(searchTimer);
       searchTimer = window.setTimeout(function () {
-        reload().catch(function (e) { toast(e.message, 'error'); });
+        reload(true).catch(function (e) { toast(e.message, 'error'); });
       }, 300);
     });
-    searchEl.addEventListener('change', function () { reload().catch(function (e) { toast(e.message, 'error'); }); });
-    statusEl.addEventListener('change', function () { reload().catch(function (e) { toast(e.message, 'error'); }); });
-    catEl.addEventListener('change', function () { reload().catch(function (e) { toast(e.message, 'error'); }); });
-    orderEl.addEventListener('change', function () { reload().catch(function (e) { toast(e.message, 'error'); }); });
+    searchEl.addEventListener('change', function () { reload(true).catch(function (e) { toast(e.message, 'error'); }); });
+    statusEl.addEventListener('change', function () { reload(true).catch(function (e) { toast(e.message, 'error'); }); });
+    catEl.addEventListener('change', function () { reload(true).catch(function (e) { toast(e.message, 'error'); }); });
+    orderEl.addEventListener('change', function () { reload(true).catch(function (e) { toast(e.message, 'error'); }); });
     await reload();
   }
 
@@ -890,6 +910,8 @@
   // ---------------------------------------------------------------- 启动
 
   function boot() {
+    // Remove persistent credentials created by earlier versions.
+    try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(USER_KEY); } catch (e) { /* ignore */ }
     $('login-form').addEventListener('submit', async function (ev) {
       ev.preventDefault();
       var u = String($('login-user').value || '').trim();

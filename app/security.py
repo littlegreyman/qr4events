@@ -4,17 +4,20 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import secrets
 import threading
 import time
-from collections import defaultdict, deque
+from collections import OrderedDict, deque
 
 from fastapi import Header, HTTPException, Request, status
 
 from .config import derive, settings
 
 _PBKDF2_ITERATIONS = 200_000
+_MIN_ACCEPTED_PBKDF2_ITERATIONS = 100_000
+_MAX_ACCEPTED_PBKDF2_ITERATIONS = 1_000_000
 
 
 def hash_password(password: str) -> str:
@@ -26,11 +29,17 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, stored: str) -> bool:
     try:
         algo, iterations, b64 = stored.split("$", 2)
-        if algo != "pbkdf2_sha256":
+        rounds = int(iterations)
+        if (
+            algo != "pbkdf2_sha256"
+            or not _MIN_ACCEPTED_PBKDF2_ITERATIONS
+            <= rounds
+            <= _MAX_ACCEPTED_PBKDF2_ITERATIONS
+        ):
             return False
         salt = derive("qr4events/admin-salt-v1")
         dk = hashlib.pbkdf2_hmac(
-            "sha256", password.encode("utf-8"), salt, int(iterations)
+            "sha256", password.encode("utf-8"), salt, rounds
         )
         return hmac.compare_digest(base64.b64encode(dk).decode("ascii"), b64)
     except (ValueError, TypeError):
@@ -65,9 +74,19 @@ def verify_token(token: str) -> str | None:
         if not hmac.compare_digest(sig, expected):
             return None
         payload = json.loads(_unb64(body))
-        if payload.get("exp", 0) < int(time.time()):
+        if not isinstance(payload, dict):
             return None
-        return payload.get("u")
+        username = payload.get("u")
+        expires = payload.get("exp")
+        if (
+            not isinstance(username, str)
+            or not username
+            or type(expires) is not int
+        ):
+            return None
+        if expires < int(time.time()):
+            return None
+        return username
     except (ValueError, TypeError, json.JSONDecodeError):
         return None
 
@@ -98,16 +117,28 @@ class SlidingWindowLimiter:
     def __init__(self, max_calls: int, window_seconds: int) -> None:
         self.max_calls = max_calls
         self.window = window_seconds
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
+        self._hits: OrderedDict[str, deque[float]] = OrderedDict()
         self._lock = threading.Lock()
+        self._max_keys = 10_000
 
     def check(self, key: str, now: float | None = None) -> bool:
         now = time.monotonic() if now is None else now
         with self._lock:
-            bucket = self._hits[key]
+            bucket = self._hits.get(key)
+            if bucket is None:
+                if len(self._hits) >= self._max_keys:
+                    self._hits.popitem(last=False)
+                bucket = deque()
+                self._hits[key] = bucket
+            else:
+                self._hits.move_to_end(key)
             cutoff = now - self.window
             while bucket and bucket[0] <= cutoff:
                 bucket.popleft()
+            if not bucket:
+                del self._hits[key]
+                bucket = deque()
+                self._hits[key] = bucket
             if len(bucket) >= self.max_calls:
                 return False
             bucket.append(now)
@@ -128,12 +159,24 @@ def client_ip(request: Request) -> str:
 
     X-Forwarded-For 是客户端可伪造的请求头，若无条件取最左值，
     攻击者每次换一个假 IP 就能让限流 key 永远不同，限流形同虚设。
-    只有在明确配置了可信反向代理（TRUST_PROXY=1）时才解析，
-    且取最右侧一跳 —— 那是离可信代理最近、不可由客户端任意追加的地址。
+    只有在直连对端 IP 属于 TRUSTED_PROXY_IPS 且 TRUST_PROXY=1 时才解析。
+    边缘代理必须覆盖或安全追加 X-Forwarded-For。
     """
-    if settings.trust_proxy:
+    peer = request.client.host if request.client else "unknown"
+    if settings.trust_proxy and settings.trusted_proxy_ips:
+        try:
+            peer_ip = ipaddress.ip_address(peer)
+            trusted = any(peer_ip in network for network in settings.trusted_proxy_ips)
+        except ValueError:
+            trusted = False
+        if not trusted:
+            return peer
         forwarded = request.headers.get("x-forwarded-for", "")
         parts = [p.strip() for p in forwarded.split(",") if p.strip()]
         if parts:
-            return parts[-1]
-    return request.client.host if request.client else "unknown"
+            try:
+                # The trusted edge proxy must overwrite/append the actual client IP.
+                return str(ipaddress.ip_address(parts[-1]))
+            except ValueError:
+                pass
+    return peer

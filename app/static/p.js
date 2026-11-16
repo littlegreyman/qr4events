@@ -6,6 +6,7 @@
   var activityId = segments[segments.length - 1] || '';
   var KEY_PHONE = 'qr4events.phone.' + activityId;
   var KEY_QUEUE = 'qr4events.queue.' + activityId;
+  var QUEUE_TTL_MS = 15 * 60 * 1000;
   var PHONE_RE = /^1[3-9]\d{9}$/;
   var STAGE_LABELS = {
     not_started: '未开始', registration: '报名中', waiting: '报名已截止',
@@ -86,11 +87,11 @@
   }
 
   function readStore(key, fallback) {
-    try { return localStorage.getItem(key) || fallback; } catch (e) { return fallback; }
+    try { return sessionStorage.getItem(key) || fallback; } catch (e) { return fallback; }
   }
 
   function writeStore(key, value) {
-    try { localStorage.setItem(key, value); } catch (e) { /* 隐私模式下忽略 */ }
+    try { sessionStorage.setItem(key, value); } catch (e) { /* 隐私模式下忽略 */ }
   }
 
   async function loadStatus(phone) {
@@ -236,7 +237,9 @@
     if (e.network && queueItem) {
       try {
         var q = JSON.parse(readStore(KEY_QUEUE, '[]'));
-        q.push(queueItem);
+        if (!Array.isArray(q)) q = [];
+        q.push({ url: queueItem.url, payload: queueItem.payload, savedAt: Date.now() });
+        if (q.length > 5) q = q.slice(-5);
         writeStore(KEY_QUEUE, JSON.stringify(q));
         toast('网络不稳定，提交已暂存，恢复网络后自动重试', 'error');
       } catch (err) { toast(e.message, 'error'); }
@@ -248,15 +251,29 @@
   async function flushQueue() {
     var q = [];
     try { q = JSON.parse(readStore(KEY_QUEUE, '[]')); } catch (e) { return; }
-    if (!q.length) return;
+    if (!Array.isArray(q) || !q.length) return;
+    var now = Date.now();
+    q = q.filter(function (item) {
+      var age = item ? now - Number(item.savedAt) : -1;
+      return item && item.payload && item.url && age >= 0 && age <= QUEUE_TTL_MS;
+    });
+    if (!q.length) { writeStore(KEY_QUEUE, '[]'); return; }
     var remain = [];
+    var succeeded = 0;
+    var failed = 0;
     for (var i = 0; i < q.length; i++) {
-      try { await post(q[i].url, q[i].payload); } catch (e) { remain.push(q[i]); }
+      try { await post(q[i].url, q[i].payload); succeeded++; }
+      catch (e) {
+        if (e.network) remain.push(q[i]);
+        else failed++;
+      }
     }
     writeStore(KEY_QUEUE, JSON.stringify(remain));
-    if (remain.length < q.length) {
+    if (succeeded) {
       toast('暂存的提交已自动重试成功', 'success');
       await loadStatus(state.phone || null);
+    } else if (failed) {
+      toast('暂存提交未成功，请检查信息后重新提交', 'error');
     }
   }
 
@@ -496,6 +513,17 @@
     if (e.key === 'Enter') { e.preventDefault(); doLookup(); }
   });
   window.addEventListener('online', flushQueue);
+
+  // Remove values saved by older versions, which used persistent localStorage.
+  try {
+    localStorage.removeItem(KEY_PHONE);
+    localStorage.removeItem(KEY_QUEUE);
+    for (var storageIndex = localStorage.length - 1; storageIndex >= 0; storageIndex--) {
+      var storedKey = localStorage.key(storageIndex);
+      if (storedKey && (storedKey.indexOf('qr4events.phone.') === 0 ||
+          storedKey.indexOf('qr4events.queue.') === 0)) localStorage.removeItem(storedKey);
+    }
+  } catch (e) { /* ignore */ }
 
   var cached = cleanPhone(readStore(KEY_PHONE, ''));
   loadStatus(cached || null);

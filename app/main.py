@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .config import BASE_DIR, settings
 from .db import get_db, init_db
@@ -63,6 +64,64 @@ logger = logging.getLogger("qr4events")
 STATIC_DIR = BASE_DIR / "app" / "static"
 
 
+class _RequestTooLarge(Exception):
+    pass
+
+
+class RequestSizeLimitMiddleware:
+    """Bound API request memory use, including chunked bodies without Content-Length."""
+
+    def __init__(self, app: ASGIApp, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not scope.get("path", "").startswith("/api/"):
+            await self.app(scope, receive, send)
+            return
+        headers = dict(scope.get("headers", []))
+        try:
+            declared = int(headers.get(b"content-length", b"0"))
+        except ValueError:
+            declared = 0
+        if declared > self.max_bytes:
+            await self._reject(send)
+            return
+
+        total = 0
+        response_started = False
+
+        async def limited_receive():
+            nonlocal total
+            message = await receive()
+            if message["type"] == "http.request":
+                total += len(message.get("body", b""))
+                if total > self.max_bytes:
+                    raise _RequestTooLarge
+            return message
+
+        async def tracked_send(message):
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracked_send)
+        except _RequestTooLarge:
+            if not response_started:
+                await self._reject(send)
+
+    @staticmethod
+    async def _reject(send: Send) -> None:
+        body = '{"ok":false,"message":"请求体过大，请减少提交内容"}'.encode("utf-8")
+        await send({"type": "http.response.start", "status": 413,
+                    "headers": [(b"content-type", b"application/json"),
+                                (b"content-length", str(len(body)).encode()),
+                                (b"cache-control", b"no-store")]})
+        await send({"type": "http.response.body", "body": body})
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
@@ -94,6 +153,7 @@ app = FastAPI(
     description="平台中立通用码 · 单码双阶段 · 服务端阶段判定",
     lifespan=lifespan,
 )
+app.add_middleware(RequestSizeLimitMiddleware, max_bytes=settings.max_request_bytes)
 
 if settings.cors_origins:
     app.add_middleware(
@@ -126,6 +186,8 @@ async def guard(request: Request, call_next):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 
@@ -343,13 +405,16 @@ def api_details(
     status: str = Query(default="all", pattern="^(all|checked_in|pending)$"),
     category: str = Query(default=""),
     order: str = Query(default="desc", pattern="^(asc|desc)$"),
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     _admin: str = Depends(require_admin),
 ):
-    return {
-        "ok": True,
-        "items": details(db, _activity_or_404(db, activity_id), search, status, category, order),
-    }
+    items, total = details(
+        db, _activity_or_404(db, activity_id), search, status, category, order,
+        limit=limit, offset=offset, with_total=True,
+    )
+    return {"ok": True, "items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @app.get("/api/admin/activities/{activity_id}/export")
